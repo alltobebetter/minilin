@@ -22,6 +22,8 @@ wheels/
 
 # PyPI
 .pypirc
+pypitoken.txt
+*token*.txt
 
 # Virtual environments
 venv/
@@ -64,7 +66,8 @@ Thumbs.db
 
 # Jupyter
 .ipynb_checkpoints/
-*.ipynb
+# Keep demo notebooks
+# *.ipynb
 
 # MyPy
 .mypy_cache/
