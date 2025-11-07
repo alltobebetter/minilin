@@ -20,6 +20,9 @@ wheels/
 .installed.cfg
 *.egg
 
+# PyPI
+.pypirc
+
 # Virtual environments
 venv/
 env/
