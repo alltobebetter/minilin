@@ -64,16 +64,20 @@ class ModelExporter:
             
             logger.info(f"Exporting to ONNX: {output_path}")
             
+            # Get model device
+            device = next(self.model.parameters()).device
+            logger.info(f"Model is on device: {device}")
+            
             self.model.eval()
             
-            # Create dummy input based on task
+            # Create dummy input based on task and move to model's device
             if self.task in ['text_classification', 'sentiment_analysis', 'ner']:
                 dummy_input = {
-                    'input_ids': torch.randint(0, 1000, (1, 128)),
-                    'attention_mask': torch.ones(1, 128, dtype=torch.long)
+                    'input_ids': torch.randint(0, 1000, (1, 128), device=device),
+                    'attention_mask': torch.ones(1, 128, dtype=torch.long, device=device)
                 }
             else:
-                dummy_input = torch.randn(1, 3, 224, 224)
+                dummy_input = torch.randn(1, 3, 224, 224, device=device)
             
             # Export
             torch.onnx.export(
