@@ -223,16 +223,23 @@ class Trainer:
                 logger.info(f"  labels: {batch['labels'].shape}")
             
             # Forward pass
-            outputs = self.model(
-                input_ids=batch['input_ids'],
-                attention_mask=batch['attention_mask'],
-                labels=batch['labels']
-            )
-            
-            # Debug first batch output
-            if batch_idx == 0:
-                logger.info(f"  logits: {outputs.logits.shape}")
-                logger.info(f"  loss: {outputs.loss}")
+            try:
+                outputs = self.model(
+                    input_ids=batch['input_ids'],
+                    attention_mask=batch['attention_mask'],
+                    labels=batch['labels']
+                )
+                
+                # Debug first batch output
+                if batch_idx == 0:
+                    logger.info(f"  logits: {outputs.logits.shape}")
+                    logger.info(f"  loss: {outputs.loss}")
+            except Exception as forward_error:
+                logger.error(f"Forward pass error in batch {batch_idx}:")
+                logger.error(f"  Error: {forward_error}")
+                logger.error(f"  Model classifier: {self.model.classifier}")
+                logger.error(f"  Model config.num_labels: {self.model.config.num_labels}")
+                raise
             
             loss = outputs.loss
             
@@ -301,6 +308,15 @@ class Trainer:
     def _update_model_output_size(self, num_labels: int):
         """Update model output layer size."""
         try:
+            # Debug: Print model structure before update
+            logger.info(f"Model structure before update:")
+            if hasattr(self.model, 'classifier'):
+                logger.info(f"  classifier: {self.model.classifier}")
+            if hasattr(self.model, 'pre_classifier'):
+                logger.info(f"  pre_classifier: {self.model.pre_classifier}")
+            if hasattr(self.model, 'config'):
+                logger.info(f"  config.num_labels: {self.model.config.num_labels}")
+            
             # Update config first
             if hasattr(self.model, 'config'):
                 self.model.config.num_labels = num_labels
@@ -319,11 +335,16 @@ class Trainer:
                 # Replace and move to device
                 self.model.classifier = new_classifier.to(self.device)
             
+            # Debug: Print model structure after update
+            logger.info(f"Model structure after update:")
+            if hasattr(self.model, 'classifier'):
+                logger.info(f"  classifier: {self.model.classifier}")
+            if hasattr(self.model, 'config'):
+                logger.info(f"  config.num_labels: {self.model.config.num_labels}")
+            
             logger.info(f"Updated model for {num_labels} classes")
             
         except Exception as e:
             logger.warning(f"Could not update model output size: {e}")
-            import traceback
-            logger.warning(traceback.format_exc())
             import traceback
             logger.warning(traceback.format_exc())
