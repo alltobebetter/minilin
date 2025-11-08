@@ -306,40 +306,18 @@ class Trainer:
                 self.model.config.num_labels = num_labels
                 self.model.config.problem_type = "single_label_classification"
             
-            # For DistilBERT: has pre_classifier (768 -> 768) and classifier (768 -> num_labels)
-            if hasattr(self.model, 'pre_classifier') and hasattr(self.model, 'classifier'):
-                # Get dimensions from existing layers
-                in_features = self.model.pre_classifier.in_features  # Should be 768
-                hidden_size = self.model.pre_classifier.out_features  # Should be 768
-                
-                logger.info(f"DistilBERT dimensions: in={in_features}, hidden={hidden_size}")
-                
-                # Recreate pre_classifier (keep same dimensions: 768 -> 768)
-                self.model.pre_classifier = nn.Linear(in_features, hidden_size)
-                nn.init.xavier_uniform_(self.model.pre_classifier.weight)
-                nn.init.zeros_(self.model.pre_classifier.bias)
-                self.model.pre_classifier.to(self.device)
-                
-                # Recreate classifier with new num_labels (768 -> num_labels)
-                self.model.classifier = nn.Linear(hidden_size, num_labels)
-                nn.init.xavier_uniform_(self.model.classifier.weight)
-                nn.init.zeros_(self.model.classifier.bias)
-                self.model.classifier.to(self.device)
-                
-                # Recreate dropout
-                if hasattr(self.model, 'dropout'):
-                    self.model.dropout = nn.Dropout(0.2)
-                
-            # For other models: only has classifier
-            elif hasattr(self.model, 'classifier'):
+            # CRITICAL FIX: Don't recreate layers, just update the classifier
+            # The pre_classifier should stay as-is from pretrained model
+            if hasattr(self.model, 'classifier'):
                 in_features = self.model.classifier.in_features
-                self.model.classifier = nn.Linear(in_features, num_labels)
-                nn.init.xavier_uniform_(self.model.classifier.weight)
-                nn.init.zeros_(self.model.classifier.bias)
-                self.model.classifier.to(self.device)
-            
-            # Force model to recompute any cached values
-            self.model.train()
+                
+                # Only replace the classifier layer
+                new_classifier = nn.Linear(in_features, num_labels)
+                nn.init.xavier_uniform_(new_classifier.weight)
+                nn.init.zeros_(new_classifier.bias)
+                
+                # Replace and move to device
+                self.model.classifier = new_classifier.to(self.device)
             
             logger.info(f"Updated model for {num_labels} classes")
             
