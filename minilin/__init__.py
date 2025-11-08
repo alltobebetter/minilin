@@ -4,7 +4,7 @@ MiniLin Framework - Learn More with Less
 A universal low-resource deep learning framework for text, image, and audio tasks.
 """
 
-__version__ = "0.1.5"
+__version__ = "0.1.6"
 __author__ = "MiniLin Team"
 __email__ = "contact@minilin.ai"
 

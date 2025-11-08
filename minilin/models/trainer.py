@@ -210,13 +210,30 @@ class Trainer:
         self.model.train()
         total_loss = 0
         
-        for batch in tqdm(train_loader, desc="Training"):
+        for batch_idx, batch in enumerate(tqdm(train_loader, desc="Training")):
             # Move batch to device
             batch = {k: v.to(self.device) if isinstance(v, torch.Tensor) else v 
                     for k, v in batch.items()}
             
+            # Debug first batch
+            if batch_idx == 0:
+                logger.info(f"First batch shapes:")
+                logger.info(f"  input_ids: {batch['input_ids'].shape}")
+                logger.info(f"  attention_mask: {batch['attention_mask'].shape}")
+                logger.info(f"  labels: {batch['labels'].shape}")
+            
             # Forward pass
-            outputs = self.model(**batch)
+            outputs = self.model(
+                input_ids=batch['input_ids'],
+                attention_mask=batch['attention_mask'],
+                labels=batch['labels']
+            )
+            
+            # Debug first batch output
+            if batch_idx == 0:
+                logger.info(f"  logits: {outputs.logits.shape}")
+                logger.info(f"  loss: {outputs.loss}")
+            
             loss = outputs.loss
             
             # Backward pass
@@ -287,21 +304,23 @@ class Trainer:
             # Update config first
             if hasattr(self.model, 'config'):
                 self.model.config.num_labels = num_labels
-                # Also update problem_type for proper loss calculation
                 self.model.config.problem_type = "single_label_classification"
             
             # For DistilBERT: has pre_classifier (768 -> 768) and classifier (768 -> num_labels)
             if hasattr(self.model, 'pre_classifier') and hasattr(self.model, 'classifier'):
-                # Get the hidden size from pre_classifier
-                hidden_size = self.model.pre_classifier.out_features
+                # Get dimensions from existing layers
+                in_features = self.model.pre_classifier.in_features  # Should be 768
+                hidden_size = self.model.pre_classifier.out_features  # Should be 768
                 
-                # Recreate pre_classifier (keep same dimensions)
-                self.model.pre_classifier = nn.Linear(hidden_size, hidden_size)
+                logger.info(f"DistilBERT dimensions: in={in_features}, hidden={hidden_size}")
+                
+                # Recreate pre_classifier (keep same dimensions: 768 -> 768)
+                self.model.pre_classifier = nn.Linear(in_features, hidden_size)
                 nn.init.xavier_uniform_(self.model.pre_classifier.weight)
                 nn.init.zeros_(self.model.pre_classifier.bias)
                 self.model.pre_classifier.to(self.device)
                 
-                # Recreate classifier with new num_labels
+                # Recreate classifier with new num_labels (768 -> num_labels)
                 self.model.classifier = nn.Linear(hidden_size, num_labels)
                 nn.init.xavier_uniform_(self.model.classifier.weight)
                 nn.init.zeros_(self.model.classifier.bias)
@@ -326,5 +345,7 @@ class Trainer:
             
         except Exception as e:
             logger.warning(f"Could not update model output size: {e}")
+            import traceback
+            logger.warning(traceback.format_exc())
             import traceback
             logger.warning(traceback.format_exc())
