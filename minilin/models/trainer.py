@@ -285,7 +285,14 @@ class Trainer:
         """Load tokenizer for text tasks."""
         try:
             from transformers import AutoTokenizer
-            model_name = 'distilbert-base-uncased'
+            
+            # Try to get model name from model config
+            if hasattr(self.model, 'config') and hasattr(self.model.config, '_name_or_path'):
+                model_name = self.model.config._name_or_path
+            else:
+                # Fallback to multilingual model for better language coverage
+                model_name = 'xlm-roberta-base'
+            
             self.tokenizer = AutoTokenizer.from_pretrained(model_name)
             logger.info(f"Loaded tokenizer: {model_name}")
         except Exception as e:
