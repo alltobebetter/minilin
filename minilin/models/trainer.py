@@ -284,14 +284,29 @@ class Trainer:
     def _update_model_output_size(self, num_labels: int):
         """Update model output layer size."""
         try:
+            # Update config first
             if hasattr(self.model, 'config'):
                 self.model.config.num_labels = num_labels
+                # Also update problem_type for proper loss calculation
+                self.model.config.problem_type = "single_label_classification"
             
+            # Update classifier layer
             if hasattr(self.model, 'classifier'):
-                # Update classifier layer
                 in_features = self.model.classifier.in_features
-                self.model.classifier = nn.Linear(in_features, num_labels)
+                new_classifier = nn.Linear(in_features, num_labels)
+                # Initialize weights properly
+                nn.init.xavier_uniform_(new_classifier.weight)
+                nn.init.zeros_(new_classifier.bias)
+                self.model.classifier = new_classifier
                 self.model.classifier.to(self.device)
+            
+            # For DistilBERT and similar models, also update pre_classifier if exists
+            if hasattr(self.model, 'pre_classifier'):
+                # Keep pre_classifier as is, only update final classifier
+                pass
+            
+            # Force model to recompute any cached values
+            self.model.train()
             
             logger.info(f"Updated model for {num_labels} classes")
             
