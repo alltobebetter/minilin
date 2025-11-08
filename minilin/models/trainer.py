@@ -328,15 +328,35 @@ class Trainer:
                 self.model.config.num_labels = num_labels
                 self.model.config.problem_type = "single_label_classification"
             
-            # Replace classifier layer
+            # Handle different model architectures
             if hasattr(self.model, 'classifier'):
-                in_features = self.model.classifier.in_features
-                self.model.classifier = nn.Linear(in_features, num_labels)
-                nn.init.xavier_uniform_(self.model.classifier.weight)
-                nn.init.zeros_(self.model.classifier.bias)
+                # Check if it's a simple Linear layer or a complex head
+                if hasattr(self.model.classifier, 'in_features'):
+                    # Simple Linear layer (DistilBERT, BERT, etc.)
+                    in_features = self.model.classifier.in_features
+                    self.model.classifier = nn.Linear(in_features, num_labels)
+                    nn.init.xavier_uniform_(self.model.classifier.weight)
+                    nn.init.zeros_(self.model.classifier.bias)
+                elif hasattr(self.model.classifier, 'out_proj'):
+                    # XLM-RoBERTa style head with out_proj
+                    in_features = self.model.classifier.out_proj.in_features
+                    self.model.classifier.out_proj = nn.Linear(in_features, num_labels)
+                    nn.init.xavier_uniform_(self.model.classifier.out_proj.weight)
+                    nn.init.zeros_(self.model.classifier.out_proj.bias)
+                elif hasattr(self.model.classifier, 'dense'):
+                    # RoBERTa style head with dense layer
+                    out_features = self.model.classifier.dense.out_features
+                    # Replace the final projection layer
+                    if hasattr(self.model.classifier, 'out_proj'):
+                        self.model.classifier.out_proj = nn.Linear(out_features, num_labels)
+                    else:
+                        # Create new output layer
+                        self.model.classifier.out_proj = nn.Linear(out_features, num_labels)
             
             logger.info(f"Configured model for {num_labels} classes")
             
         except Exception as e:
             logger.error(f"Failed to configure model: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             raise
