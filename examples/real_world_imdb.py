@@ -24,8 +24,9 @@ def prepare_dataset(dataset, num_samples, output_file):
     print(f"📝 Preparing dataset with {num_samples} samples...")
     
     # Get equal number of positive and negative samples
-    pos_samples = [item for item in dataset['train'] if item['label'] == 1]
-    neg_samples = [item for item in dataset['train'] if item['label'] == 0]
+    train_data = list(dataset['train'])
+    pos_samples = [item for item in train_data if item['label'] == 1]
+    neg_samples = [item for item in train_data if item['label'] == 0]
     
     # Sample equally
     samples_per_class = num_samples // 2
