@@ -193,13 +193,67 @@ class Trainer:
         """
         logger.info("Evaluating model...")
         
-        # For now, return dummy metrics
-        # In production, this would run actual evaluation
+        if test_data_path is None:
+            logger.warning("No test data path provided, skipping evaluation")
+            return {
+                'accuracy': 0.0,
+                'precision': 0.0,
+                'recall': 0.0,
+                'f1': 0.0
+            }
+        
+        # Load test data
+        data_loader = DataLoader(
+            data_path=test_data_path,
+            task=self.task
+        )
+        _, _, test_data = data_loader.load()
+        
+        if not test_data:
+            logger.warning("No test data available")
+            return {
+                'accuracy': 0.0,
+                'precision': 0.0,
+                'recall': 0.0,
+                'f1': 0.0
+            }
+        
+        # Create test dataset
+        test_dataset = SimpleDataset(test_data, self.tokenizer, label_map=self.label_map)
+        test_loader = TorchDataLoader(test_dataset, batch_size=16, shuffle=False)
+        
+        # Evaluate
+        self.model.eval()
+        all_preds = []
+        all_labels = []
+        
+        with torch.no_grad():
+            for batch in tqdm(test_loader, desc="Evaluating"):
+                batch = {k: v.to(self.device) if isinstance(v, torch.Tensor) else v 
+                        for k, v in batch.items()}
+                
+                outputs = self.model(
+                    input_ids=batch['input_ids'],
+                    attention_mask=batch['attention_mask']
+                )
+                
+                preds = torch.argmax(outputs.logits, dim=-1)
+                all_preds.extend(preds.cpu().numpy())
+                all_labels.extend(batch['labels'].cpu().numpy())
+        
+        # Calculate metrics
+        from sklearn.metrics import accuracy_score, precision_recall_fscore_support
+        
+        accuracy = accuracy_score(all_labels, all_preds)
+        precision, recall, f1, _ = precision_recall_fscore_support(
+            all_labels, all_preds, average='weighted', zero_division=0
+        )
+        
         metrics = {
-            'accuracy': 0.85,
-            'precision': 0.83,
-            'recall': 0.87,
-            'f1': 0.85
+            'accuracy': float(accuracy),
+            'precision': float(precision),
+            'recall': float(recall),
+            'f1': float(f1)
         }
         
         logger.info(f"Evaluation complete: {metrics}")
