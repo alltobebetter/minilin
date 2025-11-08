@@ -222,47 +222,23 @@ class Trainer:
                 logger.info(f"  attention_mask: {batch['attention_mask'].shape}")
                 logger.info(f"  labels: {batch['labels'].shape}")
             
-            # Forward pass - first without labels to see logits shape
-            try:
-                # Get logits without computing loss
-                with torch.no_grad():
-                    test_outputs = self.model(
-                        input_ids=batch['input_ids'],
-                        attention_mask=batch['attention_mask']
-                    )
-                    if batch_idx == 0:
-                        logger.info(f"  logits shape (no labels): {test_outputs.logits.shape}")
-                
-                # Now do the actual forward pass with labels
-                outputs = self.model(
-                    input_ids=batch['input_ids'],
-                    attention_mask=batch['attention_mask'],
-                    labels=batch['labels']
-                )
-                
-                # Debug first batch output
-                if batch_idx == 0:
-                    logger.info(f"  logits shape (with labels): {outputs.logits.shape}")
-                    logger.info(f"  loss: {outputs.loss}")
-            except Exception as forward_error:
-                logger.error(f"Forward pass error in batch {batch_idx}:")
-                logger.error(f"  Error: {forward_error}")
-                logger.error(f"  Model classifier: {self.model.classifier}")
-                logger.error(f"  Model config.num_labels: {self.model.config.num_labels}")
-                
-                # Try to get more info about what's happening
-                try:
-                    test_out = self.model(
-                        input_ids=batch['input_ids'],
-                        attention_mask=batch['attention_mask']
-                    )
-                    logger.error(f"  Logits shape without labels: {test_out.logits.shape}")
-                except Exception as e2:
-                    logger.error(f"  Can't even forward without labels: {e2}")
-                
-                raise
+            # Forward pass WITHOUT labels, then compute loss manually
+            # This avoids the bug in DistilBERT's internal loss computation
+            outputs = self.model(
+                input_ids=batch['input_ids'],
+                attention_mask=batch['attention_mask']
+            )
             
-            loss = outputs.loss
+            # Debug first batch
+            if batch_idx == 0:
+                logger.info(f"  logits: {outputs.logits.shape}")
+            
+            # Manually compute cross entropy loss
+            loss_fct = nn.CrossEntropyLoss()
+            loss = loss_fct(outputs.logits, batch['labels'])
+            
+            if batch_idx == 0:
+                logger.info(f"  loss: {loss.item()}")
             
             # Backward pass
             optimizer.zero_grad()
@@ -277,14 +253,19 @@ class Trainer:
         """Validate for one epoch."""
         self.model.eval()
         total_loss = 0
+        loss_fct = nn.CrossEntropyLoss()
         
         with torch.no_grad():
             for batch in tqdm(val_loader, desc="Validating"):
                 batch = {k: v.to(self.device) if isinstance(v, torch.Tensor) else v 
                         for k, v in batch.items()}
                 
-                outputs = self.model(**batch)
-                loss = outputs.loss
+                # Forward without labels, compute loss manually
+                outputs = self.model(
+                    input_ids=batch['input_ids'],
+                    attention_mask=batch['attention_mask']
+                )
+                loss = loss_fct(outputs.logits, batch['labels'])
                 total_loss += loss.item()
         
         return total_loss / len(val_loader)

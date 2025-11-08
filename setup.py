@@ -5,7 +5,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setup(
     name="minilin",
-    version="0.1.9",
+    version="0.2.0",
     author="MiniLin Team",
     author_email="contact@minilin.ai",
     description="A universal low-resource deep learning framework - Learn More with Less",
