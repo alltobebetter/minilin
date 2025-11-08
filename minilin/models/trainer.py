@@ -222,8 +222,18 @@ class Trainer:
                 logger.info(f"  attention_mask: {batch['attention_mask'].shape}")
                 logger.info(f"  labels: {batch['labels'].shape}")
             
-            # Forward pass
+            # Forward pass - first without labels to see logits shape
             try:
+                # Get logits without computing loss
+                with torch.no_grad():
+                    test_outputs = self.model(
+                        input_ids=batch['input_ids'],
+                        attention_mask=batch['attention_mask']
+                    )
+                    if batch_idx == 0:
+                        logger.info(f"  logits shape (no labels): {test_outputs.logits.shape}")
+                
+                # Now do the actual forward pass with labels
                 outputs = self.model(
                     input_ids=batch['input_ids'],
                     attention_mask=batch['attention_mask'],
@@ -232,13 +242,24 @@ class Trainer:
                 
                 # Debug first batch output
                 if batch_idx == 0:
-                    logger.info(f"  logits: {outputs.logits.shape}")
+                    logger.info(f"  logits shape (with labels): {outputs.logits.shape}")
                     logger.info(f"  loss: {outputs.loss}")
             except Exception as forward_error:
                 logger.error(f"Forward pass error in batch {batch_idx}:")
                 logger.error(f"  Error: {forward_error}")
                 logger.error(f"  Model classifier: {self.model.classifier}")
                 logger.error(f"  Model config.num_labels: {self.model.config.num_labels}")
+                
+                # Try to get more info about what's happening
+                try:
+                    test_out = self.model(
+                        input_ids=batch['input_ids'],
+                        attention_mask=batch['attention_mask']
+                    )
+                    logger.error(f"  Logits shape without labels: {test_out.logits.shape}")
+                except Exception as e2:
+                    logger.error(f"  Can't even forward without labels: {e2}")
+                
                 raise
             
             loss = outputs.loss
