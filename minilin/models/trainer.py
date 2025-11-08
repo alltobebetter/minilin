@@ -1,4 +1,4 @@
-"""Model training module"""
+"""Model training module - Robust and universal implementation"""
 
 from pathlib import Path
 from typing import Dict, Any, Optional, Union, List
@@ -6,6 +6,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader as TorchDataLoader
 from tqdm import tqdm
+import numpy as np
 
 from minilin.data import DataLoader, DataAugmenter
 from minilin.utils import setup_logger
@@ -14,7 +15,7 @@ logger = setup_logger(__name__)
 
 
 class SimpleDataset(Dataset):
-    """Simple PyTorch dataset wrapper."""
+    """Universal PyTorch dataset wrapper."""
     
     def __init__(self, samples: List[Dict[str, Any]], tokenizer=None, max_length: int = 128, label_map: dict = None):
         self.samples = samples
@@ -34,18 +35,10 @@ class SimpleDataset(Dataset):
             label = sample.get('label', 0)
             
             # Convert label using label_map
-            if self.label_map:
-                if label in self.label_map:
-                    label = self.label_map[label]
-                else:
-                    # Unknown label - use first label in map
-                    label = 0
-                    logger.warning(f"Unknown label '{sample.get('label')}' at index {idx}, using 0")
+            if isinstance(label, str) and self.label_map:
+                label = self.label_map.get(label, 0)
             elif not isinstance(label, int):
                 label = 0
-            
-            # Ensure label is within valid range
-            label = max(0, min(label, len(self.label_map) - 1))
             
             encoding = self.tokenizer(
                 text,
@@ -67,10 +60,10 @@ class SimpleDataset(Dataset):
 
 class Trainer:
     """
-    Model trainer with automatic strategy selection.
+    Universal model trainer - works for any classification task.
     
     Args:
-        model: PyTorch model
+        model: PyTorch model (will be configured automatically)
         task: Task type
         strategy: Training strategy
     """
@@ -80,10 +73,10 @@ class Trainer:
         self.task = task
         self.strategy = strategy
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        self.model.to(self.device)
         
         self.tokenizer = None
         self.label_map = {}
+        self.num_labels = 0
         
         logger.info(f"Trainer initialized on device: {self.device}")
     
@@ -97,20 +90,7 @@ class Trainer:
         max_samples: Optional[int] = None,
         **kwargs
     ) -> Dict[str, Any]:
-        """
-        Train the model.
-        
-        Args:
-            data_path: Path to training data
-            augmenter: Data augmenter instance
-            epochs: Number of training epochs
-            batch_size: Batch size
-            learning_rate: Learning rate
-            max_samples: Maximum samples to use
-            
-        Returns:
-            Training metrics
-        """
+        """Train the model."""
         logger.info("Starting training...")
         
         # Load data
@@ -126,30 +106,26 @@ class Trainer:
             logger.info("Applying data augmentation...")
             train_data = augmenter.augment(train_data)
         
-        # Build label map from all data (train + val) to ensure consistency
+        # Build label map from all data
         all_data = train_data + val_data
         self._build_label_map(all_data)
         
-        # Update model output size
-        self._update_model_output_size(len(self.label_map))
+        # Configure model for the number of classes
+        self._configure_model(self.num_labels)
+        
+        # Move model to device AFTER configuration
+        self.model.to(self.device)
         
         # Load tokenizer for text tasks
         if self.task in ['text_classification', 'sentiment_analysis', 'ner']:
             self._load_tokenizer()
         
-        # Create datasets with label mapping
+        # Create datasets
         train_dataset = SimpleDataset(train_data, self.tokenizer, label_map=self.label_map)
         val_dataset = SimpleDataset(val_data, self.tokenizer, label_map=self.label_map)
         
-        train_loader = TorchDataLoader(
-            train_dataset,
-            batch_size=batch_size,
-            shuffle=True
-        )
-        val_loader = TorchDataLoader(
-            val_dataset,
-            batch_size=batch_size
-        )
+        train_loader = TorchDataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+        val_loader = TorchDataLoader(val_dataset, batch_size=batch_size)
         
         # Setup optimizer
         optimizer = torch.optim.AdamW(self.model.parameters(), lr=learning_rate)
@@ -161,17 +137,14 @@ class Trainer:
         for epoch in range(epochs):
             logger.info(f"Epoch {epoch + 1}/{epochs}")
             
-            # Train
             train_loss = self._train_epoch(train_loader, optimizer)
-            metrics['train_losses'].append(train_loss)
-            
-            # Validate
             val_loss = self._validate_epoch(val_loader)
+            
+            metrics['train_losses'].append(train_loss)
             metrics['val_losses'].append(val_loss)
             
             logger.info(f"Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}")
             
-            # Save best model
             if val_loss < best_val_loss:
                 best_val_loss = val_loss
                 logger.info("New best model!")
@@ -182,43 +155,22 @@ class Trainer:
         return metrics
     
     def evaluate(self, test_data_path: Optional[Union[str, Path]] = None) -> Dict[str, Any]:
-        """
-        Evaluate the model.
-        
-        Args:
-            test_data_path: Path to test data
-            
-        Returns:
-            Evaluation metrics
-        """
+        """Evaluate the model."""
         logger.info("Evaluating model...")
         
         if test_data_path is None:
-            logger.warning("No test data path provided, skipping evaluation")
-            return {
-                'accuracy': 0.0,
-                'precision': 0.0,
-                'recall': 0.0,
-                'f1': 0.0
-            }
+            logger.warning("No test data path provided")
+            return {'accuracy': 0.0, 'precision': 0.0, 'recall': 0.0, 'f1': 0.0}
         
         # Load test data
-        data_loader = DataLoader(
-            data_path=test_data_path,
-            task=self.task
-        )
+        data_loader = DataLoader(data_path=test_data_path, task=self.task)
         _, _, test_data = data_loader.load()
         
         if not test_data:
             logger.warning("No test data available")
-            return {
-                'accuracy': 0.0,
-                'precision': 0.0,
-                'recall': 0.0,
-                'f1': 0.0
-            }
+            return {'accuracy': 0.0, 'precision': 0.0, 'recall': 0.0, 'f1': 0.0}
         
-        # Create test dataset
+        # Create test dataset with SAME label_map as training
         test_dataset = SimpleDataset(test_data, self.tokenizer, label_map=self.label_map)
         test_loader = TorchDataLoader(test_dataset, batch_size=16, shuffle=False)
         
@@ -263,36 +215,20 @@ class Trainer:
         """Train for one epoch."""
         self.model.train()
         total_loss = 0
+        loss_fct = nn.CrossEntropyLoss()
         
-        for batch_idx, batch in enumerate(tqdm(train_loader, desc="Training")):
-            # Move batch to device
+        for batch in tqdm(train_loader, desc="Training"):
             batch = {k: v.to(self.device) if isinstance(v, torch.Tensor) else v 
                     for k, v in batch.items()}
             
-            # Debug first batch
-            if batch_idx == 0:
-                logger.info(f"First batch shapes:")
-                logger.info(f"  input_ids: {batch['input_ids'].shape}")
-                logger.info(f"  attention_mask: {batch['attention_mask'].shape}")
-                logger.info(f"  labels: {batch['labels'].shape}")
-            
-            # Forward pass WITHOUT labels, then compute loss manually
-            # This avoids the bug in DistilBERT's internal loss computation
+            # Forward pass
             outputs = self.model(
                 input_ids=batch['input_ids'],
                 attention_mask=batch['attention_mask']
             )
             
-            # Debug first batch
-            if batch_idx == 0:
-                logger.info(f"  logits: {outputs.logits.shape}")
-            
-            # Manually compute cross entropy loss
-            loss_fct = nn.CrossEntropyLoss()
+            # Compute loss manually
             loss = loss_fct(outputs.logits, batch['labels'])
-            
-            if batch_idx == 0:
-                logger.info(f"  loss: {loss.item()}")
             
             # Backward pass
             optimizer.zero_grad()
@@ -314,7 +250,6 @@ class Trainer:
                 batch = {k: v.to(self.device) if isinstance(v, torch.Tensor) else v 
                         for k, v in batch.items()}
                 
-                # Forward without labels, compute loss manually
                 outputs = self.model(
                     input_ids=batch['input_ids'],
                     attention_mask=batch['attention_mask']
@@ -328,12 +263,9 @@ class Trainer:
         """Load tokenizer for text tasks."""
         try:
             from transformers import AutoTokenizer
-            
-            # Use model's config to get tokenizer
-            model_name = 'distilbert-base-uncased'  # Default
+            model_name = 'distilbert-base-uncased'
             self.tokenizer = AutoTokenizer.from_pretrained(model_name)
             logger.info(f"Loaded tokenizer: {model_name}")
-            
         except Exception as e:
             logger.error(f"Failed to load tokenizer: {e}")
             raise
@@ -346,61 +278,36 @@ class Trainer:
             if label is not None:
                 labels.add(label)
         
-        # Sort labels to ensure consistent mapping
         sorted_labels = sorted(labels)
         
-        # If labels are already integers starting from 0, use them directly
+        # Create mapping: label -> index
         if all(isinstance(l, int) for l in sorted_labels):
-            if sorted_labels == list(range(len(sorted_labels))):
-                self.label_map = {label: label for label in sorted_labels}
-            else:
-                self.label_map = {label: idx for idx, label in enumerate(sorted_labels)}
+            # Integer labels
+            self.label_map = {label: label for label in sorted_labels}
         else:
-            # For string labels, create mapping
+            # String labels
             self.label_map = {label: idx for idx, label in enumerate(sorted_labels)}
         
-        logger.info(f"Built label map with {len(self.label_map)} classes: {self.label_map}")
+        self.num_labels = len(self.label_map)
+        logger.info(f"Built label map with {self.num_labels} classes: {self.label_map}")
     
-    def _update_model_output_size(self, num_labels: int):
-        """Update model output layer size."""
+    def _configure_model(self, num_labels: int):
+        """Configure model for the correct number of classes."""
         try:
-            # Debug: Print model structure before update
-            logger.info(f"Model structure before update:")
-            if hasattr(self.model, 'classifier'):
-                logger.info(f"  classifier: {self.model.classifier}")
-            if hasattr(self.model, 'pre_classifier'):
-                logger.info(f"  pre_classifier: {self.model.pre_classifier}")
-            if hasattr(self.model, 'config'):
-                logger.info(f"  config.num_labels: {self.model.config.num_labels}")
-            
-            # Update config first
+            # Update config
             if hasattr(self.model, 'config'):
                 self.model.config.num_labels = num_labels
                 self.model.config.problem_type = "single_label_classification"
             
-            # CRITICAL FIX: Don't recreate layers, just update the classifier
-            # The pre_classifier should stay as-is from pretrained model
+            # Replace classifier layer
             if hasattr(self.model, 'classifier'):
                 in_features = self.model.classifier.in_features
-                
-                # Only replace the classifier layer
-                new_classifier = nn.Linear(in_features, num_labels)
-                nn.init.xavier_uniform_(new_classifier.weight)
-                nn.init.zeros_(new_classifier.bias)
-                
-                # Replace and move to device
-                self.model.classifier = new_classifier.to(self.device)
+                self.model.classifier = nn.Linear(in_features, num_labels)
+                nn.init.xavier_uniform_(self.model.classifier.weight)
+                nn.init.zeros_(self.model.classifier.bias)
             
-            # Debug: Print model structure after update
-            logger.info(f"Model structure after update:")
-            if hasattr(self.model, 'classifier'):
-                logger.info(f"  classifier: {self.model.classifier}")
-            if hasattr(self.model, 'config'):
-                logger.info(f"  config.num_labels: {self.model.config.num_labels}")
-            
-            logger.info(f"Updated model for {num_labels} classes")
+            logger.info(f"Configured model for {num_labels} classes")
             
         except Exception as e:
-            logger.warning(f"Could not update model output size: {e}")
-            import traceback
-            logger.warning(traceback.format_exc())
+            logger.error(f"Failed to configure model: {e}")
+            raise
