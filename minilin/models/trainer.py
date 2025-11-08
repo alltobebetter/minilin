@@ -170,6 +170,21 @@ class Trainer:
             logger.warning("No test data available")
             return {'accuracy': 0.0, 'precision': 0.0, 'recall': 0.0, 'f1': 0.0}
         
+        # Debug: Check test data labels
+        test_labels = set()
+        for sample in test_data:
+            label = sample.get('label', sample.get('labels'))
+            if label is not None:
+                test_labels.add(label)
+        
+        logger.info(f"Test data labels: {test_labels}")
+        logger.info(f"Training label_map: {self.label_map}")
+        
+        # Check if test labels are in training label_map
+        missing_labels = test_labels - set(self.label_map.keys())
+        if missing_labels:
+            logger.warning(f"Test data contains labels not seen in training: {missing_labels}")
+        
         # Create test dataset with SAME label_map as training
         test_dataset = SimpleDataset(test_data, self.tokenizer, label_map=self.label_map)
         test_loader = TorchDataLoader(test_dataset, batch_size=16, shuffle=False)
@@ -178,9 +193,10 @@ class Trainer:
         self.model.eval()
         all_preds = []
         all_labels = []
+        all_texts = []
         
         with torch.no_grad():
-            for batch in tqdm(test_loader, desc="Evaluating"):
+            for batch_idx, batch in enumerate(tqdm(test_loader, desc="Evaluating")):
                 batch = {k: v.to(self.device) if isinstance(v, torch.Tensor) else v 
                         for k, v in batch.items()}
                 
@@ -192,6 +208,12 @@ class Trainer:
                 preds = torch.argmax(outputs.logits, dim=-1)
                 all_preds.extend(preds.cpu().numpy())
                 all_labels.extend(batch['labels'].cpu().numpy())
+                
+                # Debug first batch
+                if batch_idx == 0:
+                    logger.info(f"First batch predictions: {preds.cpu().numpy()}")
+                    logger.info(f"First batch true labels: {batch['labels'].cpu().numpy()}")
+                    logger.info(f"First batch logits: {outputs.logits[0].cpu().numpy()}")
         
         # Calculate metrics
         from sklearn.metrics import accuracy_score, precision_recall_fscore_support
