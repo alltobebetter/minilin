@@ -290,20 +290,34 @@ class Trainer:
                 # Also update problem_type for proper loss calculation
                 self.model.config.problem_type = "single_label_classification"
             
-            # Update classifier layer
-            if hasattr(self.model, 'classifier'):
-                in_features = self.model.classifier.in_features
-                new_classifier = nn.Linear(in_features, num_labels)
-                # Initialize weights properly
-                nn.init.xavier_uniform_(new_classifier.weight)
-                nn.init.zeros_(new_classifier.bias)
-                self.model.classifier = new_classifier
+            # For DistilBERT: has pre_classifier (768 -> 768) and classifier (768 -> num_labels)
+            if hasattr(self.model, 'pre_classifier') and hasattr(self.model, 'classifier'):
+                # Get the hidden size from pre_classifier
+                hidden_size = self.model.pre_classifier.out_features
+                
+                # Recreate pre_classifier (keep same dimensions)
+                self.model.pre_classifier = nn.Linear(hidden_size, hidden_size)
+                nn.init.xavier_uniform_(self.model.pre_classifier.weight)
+                nn.init.zeros_(self.model.pre_classifier.bias)
+                self.model.pre_classifier.to(self.device)
+                
+                # Recreate classifier with new num_labels
+                self.model.classifier = nn.Linear(hidden_size, num_labels)
+                nn.init.xavier_uniform_(self.model.classifier.weight)
+                nn.init.zeros_(self.model.classifier.bias)
                 self.model.classifier.to(self.device)
-            
-            # For DistilBERT and similar models, also update pre_classifier if exists
-            if hasattr(self.model, 'pre_classifier'):
-                # Keep pre_classifier as is, only update final classifier
-                pass
+                
+                # Recreate dropout
+                if hasattr(self.model, 'dropout'):
+                    self.model.dropout = nn.Dropout(0.2)
+                
+            # For other models: only has classifier
+            elif hasattr(self.model, 'classifier'):
+                in_features = self.model.classifier.in_features
+                self.model.classifier = nn.Linear(in_features, num_labels)
+                nn.init.xavier_uniform_(self.model.classifier.weight)
+                nn.init.zeros_(self.model.classifier.bias)
+                self.model.classifier.to(self.device)
             
             # Force model to recompute any cached values
             self.model.train()
@@ -312,3 +326,5 @@ class Trainer:
             
         except Exception as e:
             logger.warning(f"Could not update model output size: {e}")
+            import traceback
+            logger.warning(traceback.format_exc())
